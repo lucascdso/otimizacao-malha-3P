@@ -4,11 +4,18 @@ import numpy as np
 import io
 
 # ==============================================================================
-# 1. CONFIGURAÇÕES DA PÁGINA
+# 1. CONFIGURAÇÕES DA PÁGINA E PARÂMETROS
 # ==============================================================================
 st.set_page_config(page_title="Otimização de Prazos", layout="wide")
-st.title("⏱️ Otimizador de Prazos e Nível de Serviço (NS) 3P")
+st.title("⏱️ Otimizador de Prazos e Nível de Serviço (NS)")
 st.write("Faça o upload da sua base CSV para simular o melhor cenário de prazo de entrega (em Dias Úteis).")
+
+# Menu lateral para estipular as metas dinamicamente
+st.sidebar.header("🎯 Parâmetros de Otimização")
+meta_ns = st.sidebar.slider("Meta de Nível de Serviço (%)", min_value=0, max_value=100, value=95) / 100.0
+limite_prazo = st.sidebar.number_input("Prazo Máximo Aceitável (Dias Úteis)", min_value=1, value=7)
+
+st.sidebar.info(f"O motor tentará atingir **{meta_ns*100:.0f}% de NS** sem deixar o novo prazo ultrapassar **{limite_prazo} dias úteis**.")
 
 # ==============================================================================
 # 2. FUNÇÕES DE LIMPEZA E LÓGICA
@@ -16,7 +23,6 @@ st.write("Faça o upload da sua base CSV para simular o melhor cenário de prazo
 def clean_num(x):
     if pd.isna(x): return np.nan
     if isinstance(x, str):
-        # Removemos o % e trocamos a vírgula do decimal para ponto
         x = x.replace('%', '').replace(',', '.').strip()
     try:
         return float(x)
@@ -25,27 +31,44 @@ def clean_num(x):
 
 ns_cols = ['NS (-3)', 'NS (-2)', 'NS (-1)', 'NS (Atual)', 'NS (+1)', 'NS (+2)', 'NS (+3)']
 
-def get_best_adjustment(row):
+def get_best_adjustment(row, meta_ns, limite_prazo):
     ns_values = [row.get(c, np.nan) for c in ns_cols]
     adjustments = [-3, -2, -1, 0, 1, 2, 3]
+    prazo_atual = row.get('Prazo_Atual', 0)
 
     best_adj = None
     best_ns = None
 
-    # 3.1 Procura o primeiro cenário onde o NS seja >= 95% (em ordem de competitividade)
+    # 3.1 Cenario Ideal: Atinge a Meta de NS e respeita o Limite de Prazo
     for adj, ns in zip(adjustments, ns_values):
         if pd.isna(ns): continue
-        if ns >= 0.95:
+        novo_prazo_temp = max(prazo_atual + adj, 1)
+        
+        if ns >= meta_ns and novo_prazo_temp <= limite_prazo:
             best_adj = adj
             best_ns = ns
             break
 
-    # 3.2 Fallback: se nenhum atinge 95%, pega o que dá o maior NS absoluto
+    # 3.2 Fallback 1: Ninguém bateu a meta de NS. Busca o MAIOR NS possível dentro do Limite de Prazo (7 dias)
     if best_adj is None:
-        valid_pairs = [(adj, ns) for adj, ns in zip(adjustments, ns_values) if not pd.isna(ns)]
-        if not valid_pairs:
+        valid_pairs = []
+        for adj, ns in zip(adjustments, ns_values):
+            if not pd.isna(ns):
+                novo_prazo_temp = max(prazo_atual + adj, 1)
+                if novo_prazo_temp <= limite_prazo:
+                    valid_pairs.append((adj, ns))
+        
+        if valid_pairs:
+            best_pair = max(valid_pairs, key=lambda x: x[1])
+            return best_pair[0], best_pair[1]
+
+    # 3.3 Fallback 2: O prazo atual já é tão alto que é impossível chegar em 7 dias (ex: prazo atual = 15).
+    # Nesse caso extremo, pega o cenário de MAIOR NS absoluto entre todas as opções.
+    if best_adj is None:
+        valid_pairs_all = [(adj, ns) for adj, ns in zip(adjustments, ns_values) if not pd.isna(ns)]
+        if not valid_pairs_all:
             return 0, row.get('NS_Atual', 0)
-        best_pair = max(valid_pairs, key=lambda x: x[1])
+        best_pair = max(valid_pairs_all, key=lambda x: x[1])
         return best_pair[0], best_pair[1]
 
     return best_adj, best_ns
@@ -57,15 +80,12 @@ uploaded_file = st.file_uploader("Selecione o arquivo CSV", type=['csv'])
 
 if uploaded_file is not None:
     with st.spinner("Analisando cenários e calculando novos prazos..."):
-        # 1. Leitura do arquivo (tratando encodings comuns)
         try:
             df = pd.read_csv(uploaded_file, sep=';', encoding='utf-8')
         except UnicodeDecodeError:
-            # Se falhar, reseta o ponteiro do arquivo e tenta latin1
             uploaded_file.seek(0)
             df = pd.read_csv(uploaded_file, sep=';', encoding='latin1')
 
-        # 2. Limpeza
         if 'Qtd Pedidos' in df.columns:
             df['Qtd Pedidos'] = df['Qtd Pedidos'].apply(clean_num)
             df = df.dropna(subset=['Qtd Pedidos'])
@@ -73,29 +93,27 @@ if uploaded_file is not None:
             st.error("Aviso: Coluna 'Qtd Pedidos' não encontrada na planilha.")
             st.stop()
 
-        # ALTERAÇÃO AQUI: Mudança para buscar os Dias Úteis como base
         if 'Prazo Prometido (Dias Úteis)' in df.columns:
             df['Prazo_Atual'] = df['Prazo Prometido (Dias Úteis)'].apply(clean_num)
         else:
             st.error("Aviso: Coluna 'Prazo Prometido (Dias Úteis)' não encontrada na planilha.")
             st.stop()
 
-        # Limpando Colunas de NS e transformando em decimal
         for col in ns_cols:
             if col in df.columns:
                 df[col] = df[col].apply(clean_num) / 100.0
 
         df['NS_Atual'] = df.get('NS (Atual)', 0)
 
-        # 3. Execução da Lógica de Decisão
-        resultados = df.apply(get_best_adjustment, axis=1)
+        # Execução da Lógica de Decisão passando os novos parâmetros da tela
+        resultados = df.apply(lambda row: get_best_adjustment(row, meta_ns, limite_prazo), axis=1)
         df['Ajuste_Dias'] = [r[0] for r in resultados]
         df['NS_Projetado'] = [r[1] for r in resultados]
 
-        # 4. Cálculo do Novo Prazo (Aplicando o ajuste matemático sobre os Dias Úteis com limite mínimo de 1)
+        # Cálculo do Novo Prazo
         df['Novo_Prazo'] = (df['Prazo_Atual'] + df['Ajuste_Dias']).clip(lower=1)
 
-        # 5. Resumo Global com Média Ponderada
+        # Resumo Global com Média Ponderada
         total_pedidos = df['Qtd Pedidos'].sum()
 
         if total_pedidos > 0:
@@ -116,7 +134,6 @@ if uploaded_file is not None:
     
     st.write(f"**📦 Volume Total de Pedidos Considerados:** {int(total_pedidos):,}".replace(',', '.'))
     
-    # Cartões de Indicadores Visuais (Atualizados para refletir Dias Úteis)
     col1, col2 = st.columns(2)
     
     col1.metric("⏳ Prazo Promessa Atual (Dias Úteis)", f"{prazo_atual_pond:.2f} dias")
@@ -133,17 +150,13 @@ if uploaded_file is not None:
     st.subheader("📥 Exportação de Dados")
     
     output_cols = ['Seller', 'Estado', 'Qtd Pedidos', 'Prazo_Atual', 'NS_Atual', 'Ajuste_Dias', 'Novo_Prazo', 'NS_Projetado']
-    
-    # Garante que só puxe as colunas que realmente existem na tabela
     cols_to_export = [c for c in output_cols if c in df.columns]
     df_out = df[cols_to_export].copy()
 
-    # Devolvendo a formatação para facilitar leitura no Excel (Troca Ponto por Vírgula)
     for col in ['Prazo_Atual', 'Novo_Prazo', 'NS_Atual', 'NS_Projetado']:
         if col in df_out.columns:
             df_out[col] = df_out[col].apply(lambda x: str(x).replace('.', ','))
 
-    # Criação do CSV em Memória
     csv_data = df_out.to_csv(sep=';', index=False, encoding='utf-8').encode('utf-8')
 
     st.download_button(
