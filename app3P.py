@@ -49,7 +49,7 @@ def get_best_adjustment(row, meta_ns, limite_prazo):
             best_ns = ns
             break
 
-    # 3.2 Fallback 1: Ninguém bateu a meta de NS. Busca o MAIOR NS possível dentro do Limite de Prazo (7 dias)
+    # 3.2 Fallback 1: Ninguém bateu a meta de NS. Busca o MAIOR NS possível dentro do Limite de Prazo
     if best_adj is None:
         valid_pairs = []
         for adj, ns in zip(adjustments, ns_values):
@@ -62,7 +62,7 @@ def get_best_adjustment(row, meta_ns, limite_prazo):
             best_pair = max(valid_pairs, key=lambda x: x[1])
             return best_pair[0], best_pair[1]
 
-    # 3.3 Fallback 2: O prazo atual já é tão alto que é impossível chegar em 7 dias (ex: prazo atual = 15).
+    # 3.3 Fallback 2: O prazo atual já é tão alto que é impossível chegar no teto de dias.
     # Nesse caso extremo, pega o cenário de MAIOR NS absoluto entre todas as opções.
     if best_adj is None:
         valid_pairs_all = [(adj, ns) for adj, ns in zip(adjustments, ns_values) if not pd.isna(ns)]
@@ -151,17 +151,40 @@ if uploaded_file is not None:
     
     output_cols = ['Seller', 'Estado', 'Qtd Pedidos', 'Prazo_Atual', 'NS_Atual', 'Ajuste_Dias', 'Novo_Prazo', 'NS_Projetado']
     cols_to_export = [c for c in output_cols if c in df.columns]
-    df_out = df[cols_to_export].copy()
+    
+    # 5.1 Gera DataFrame da Base Completa
+    df_completo = df[cols_to_export].copy()
+    
+    # 5.2 Gera DataFrame apenas dos Sellers que NÃO bateram a meta de NS
+    df_abaixo_meta = df[df['NS_Projetado'] < meta_ns][cols_to_export].copy()
 
+    # Formatação para o Excel (Substituindo Ponto por Vírgula para facilitar a leitura no Brasil)
     for col in ['Prazo_Atual', 'Novo_Prazo', 'NS_Atual', 'NS_Projetado']:
-        if col in df_out.columns:
-            df_out[col] = df_out[col].apply(lambda x: str(x).replace('.', ','))
+        if col in df_completo.columns:
+            df_completo[col] = df_completo[col].apply(lambda x: str(x).replace('.', ','))
+        if col in df_abaixo_meta.columns:
+            df_abaixo_meta[col] = df_abaixo_meta[col].apply(lambda x: str(x).replace('.', ','))
 
-    csv_data = df_out.to_csv(sep=';', index=False, encoding='utf-8').encode('utf-8')
+    # Criação dos arquivos CSV em Memória
+    csv_completo = df_completo.to_csv(sep=';', index=False, encoding='utf-8').encode('utf-8')
+    csv_abaixo = df_abaixo_meta.to_csv(sep=';', index=False, encoding='utf-8').encode('utf-8')
 
-    st.download_button(
-        label="📦 Baixar Base de Prazos Otimizados (CSV)",
-        data=csv_data,
-        file_name='base_prazos_uteis_otimizados.csv',
-        mime='text/csv'
-    )
+    # Layout dos Botões Lado a Lado
+    col_dw1, col_dw2 = st.columns(2)
+    
+    with col_dw1:
+        st.download_button(
+            label="📦 Baixar Base Completa (CSV)",
+            data=csv_completo,
+            file_name='base_prazos_uteis_otimizados.csv',
+            mime='text/csv'
+        )
+        
+    with col_dw2:
+        st.download_button(
+            label="⚠️ Baixar Sellers Abaixo da Meta (CSV)",
+            data=csv_abaixo,
+            file_name='sellers_abaixo_meta_ns.csv',
+            mime='text/csv',
+            help="Extrai apenas os sellers onde o NS Projetado ficou menor que a meta estipulada no menu lateral."
+        )
