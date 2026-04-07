@@ -7,7 +7,7 @@ import io
 # 1. CONFIGURAÇÕES DA PÁGINA
 # ==============================================================================
 st.set_page_config(page_title="Otimização de Prazos", layout="wide")
-st.title("⏱️ Otimizador de Prazos e Nível de Serviço (NS)")
+st.title("⏱️ Otimizador de Prazos e Nível de Serviço (NS) 3P")
 st.write("Faça o upload da sua base CSV para simular o melhor cenário de prazo de entrega.")
 
 # ==============================================================================
