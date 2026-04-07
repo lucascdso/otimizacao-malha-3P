@@ -7,11 +7,11 @@ import io
 # 1. CONFIGURAÇÕES DA PÁGINA
 # ==============================================================================
 st.set_page_config(page_title="Otimização de Prazos", layout="wide")
-st.title("⏱️ Otimizador de Prazos e Nível de Serviço (NS) 3P")
-st.write("Faça o upload da sua base CSV para simular o melhor cenário de prazo de entrega.")
+st.title("⏱️ Otimizador de Prazos e Nível de Serviço (NS)")
+st.write("Faça o upload da sua base CSV para simular o melhor cenário de prazo de entrega (em Dias Úteis).")
 
 # ==============================================================================
-# 2. FUNÇÕES DE LIMPEZA E LÓGICA (Mantido do Original)
+# 2. FUNÇÕES DE LIMPEZA E LÓGICA
 # ==============================================================================
 def clean_num(x):
     if pd.isna(x): return np.nan
@@ -73,10 +73,11 @@ if uploaded_file is not None:
             st.error("Aviso: Coluna 'Qtd Pedidos' não encontrada na planilha.")
             st.stop()
 
-        if 'Prazo Prometido (Dias Corridos)' in df.columns:
-            df['Prazo_Atual'] = df['Prazo Prometido (Dias Corridos)'].apply(clean_num)
+        # ALTERAÇÃO AQUI: Mudança para buscar os Dias Úteis como base
+        if 'Prazo Prometido (Dias Úteis)' in df.columns:
+            df['Prazo_Atual'] = df['Prazo Prometido (Dias Úteis)'].apply(clean_num)
         else:
-            st.error("Aviso: Coluna 'Prazo Prometido (Dias Corridos)' não encontrada na planilha.")
+            st.error("Aviso: Coluna 'Prazo Prometido (Dias Úteis)' não encontrada na planilha.")
             st.stop()
 
         # Limpando Colunas de NS e transformando em decimal
@@ -91,7 +92,7 @@ if uploaded_file is not None:
         df['Ajuste_Dias'] = [r[0] for r in resultados]
         df['NS_Projetado'] = [r[1] for r in resultados]
 
-        # 4. Cálculo do Novo Prazo (com limite mínimo de 1 dia)
+        # 4. Cálculo do Novo Prazo (Aplicando o ajuste matemático sobre os Dias Úteis com limite mínimo de 1)
         df['Novo_Prazo'] = (df['Prazo_Atual'] + df['Ajuste_Dias']).clip(lower=1)
 
         # 5. Resumo Global com Média Ponderada
@@ -115,11 +116,11 @@ if uploaded_file is not None:
     
     st.write(f"**📦 Volume Total de Pedidos Considerados:** {int(total_pedidos):,}".replace(',', '.'))
     
-    # Cartões de Indicadores Visuais
+    # Cartões de Indicadores Visuais (Atualizados para refletir Dias Úteis)
     col1, col2 = st.columns(2)
     
-    col1.metric("⏳ Prazo Promessa Atual", f"{prazo_atual_pond:.2f} dias")
-    col2.metric("🚀 Novo Prazo Promessa", f"{novo_prazo_pond:.2f} dias", f"{diferenca_dias:+.2f} dias", delta_color="inverse")
+    col1.metric("⏳ Prazo Promessa Atual (Dias Úteis)", f"{prazo_atual_pond:.2f} dias")
+    col2.metric("🚀 Novo Prazo Promessa (Dias Úteis)", f"{novo_prazo_pond:.2f} dias", f"{diferenca_dias:+.2f} dias úteis", delta_color="inverse")
     
     col1.metric("📉 Nível de Serviço (Atual)", f"{ns_atual_pond:.2%}")
     col2.metric("📈 Nível de Serviço (Projetado)", f"{ns_projetado_pond:.2%}", f"{(ns_projetado_pond - ns_atual_pond)*100:+.2f}%")
@@ -148,6 +149,6 @@ if uploaded_file is not None:
     st.download_button(
         label="📦 Baixar Base de Prazos Otimizados (CSV)",
         data=csv_data,
-        file_name='base_prazos_otimizados.csv',
+        file_name='base_prazos_uteis_otimizados.csv',
         mime='text/csv'
     )
